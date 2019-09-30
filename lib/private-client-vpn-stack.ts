@@ -4,24 +4,23 @@ import autoscaling = require('@aws-cdk/aws-autoscaling');
 import iam = require('@aws-cdk/aws-iam');
 import lambda = require('@aws-cdk/aws-lambda');
 import sns = require('@aws-cdk/aws-sns');
+import ssm = require('@aws-cdk/aws-ssm');
+
 import { SnsEventSource } from '@aws-cdk/aws-lambda-event-sources';
 
 import fs = require('fs');
 
-export interface PrivateClientVpnStackProps extends cdk.StackProps {
-
-  readonly hostedZoneId: string;
-
-  readonly zoneName: string;
-
-  readonly password: string;
-
-  readonly keyname: string;
-}
-
 export class PrivateClientVpnStack extends cdk.Stack {
-  constructor(scope: cdk.Construct, id: string, props: PrivateClientVpnStackProps) {
+
+
+  constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // get parameters from SSM
+    const hostedZone = ssm.StringParameter.valueForStringParameter(this, "openvpn-hosted-zone");
+    const zoneName = ssm.StringParameter.valueForStringParameter(this, "openvpn-zone-name");
+    const password = ssm.StringParameter.valueForSecureStringParameter(this, "openvpn-admin-passwd", 1);
+    const keyname = ssm.StringParameter.valueForStringParameter(this, "openvpn-keyname");
 
     // Create the VPC with 2 public subnets
     const vpc = new ec2.Vpc(this, "ClientVpnVpc", {
@@ -60,7 +59,7 @@ export class PrivateClientVpnStack extends cdk.Stack {
     var userdatacommands: string[] = [
       "apt-get update",
       "apt-get upgrade -y",
-      `echo "openvpn:${props.password}" | chpasswd`,
+      `echo "openvpn:${password}" | chpasswd`,
     ];
 
     const userData = ec2.UserData.forLinux({
@@ -77,7 +76,7 @@ export class PrivateClientVpnStack extends cdk.Stack {
       vpc,
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.LARGE),
       machineImage: openVpnImage,
-      keyName: props.keyname,
+      keyName: keyname,
       maxCapacity: 1,
       minCapacity: 1,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
@@ -93,8 +92,8 @@ export class PrivateClientVpnStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       runtime: lambda.Runtime.PYTHON_3_7,
       environment: {
-        HOSTED_ZONE: props.hostedZoneId,
-        DNS_NAME: `${cdk.Stack.of(this).region}.vpn.${props.zoneName}`,
+        HOSTED_ZONE: hostedZone,
+        DNS_NAME: `${cdk.Stack.of(this).region}.vpn.${zoneName}`,
       }
     });
 
@@ -107,6 +106,6 @@ export class PrivateClientVpnStack extends cdk.Stack {
     }
     processEventFn.addEventSource(new SnsEventSource(topic)); 
 
-    new cdk.CfnOutput(this, 'OpenVPNUrl', { value: `https://${cdk.Stack.of(this).region}.vpn.${props.zoneName}/admin` });
+    new cdk.CfnOutput(this, 'OpenVPNUrl', { value: `https://${cdk.Stack.of(this).region}.vpn.${zoneName}/admin` });
   }
 }
