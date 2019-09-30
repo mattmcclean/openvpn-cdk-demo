@@ -4,6 +4,9 @@ import autoscaling = require('@aws-cdk/aws-autoscaling');
 import iam = require('@aws-cdk/aws-iam');
 import lambda = require('@aws-cdk/aws-lambda');
 import sns = require('@aws-cdk/aws-sns');
+import { SnsEventSource } from '@aws-cdk/aws-lambda-event-sources';
+
+import fs = require('fs');
 
 export interface PrivateClientVpnStackProps extends cdk.StackProps {
 
@@ -53,18 +56,10 @@ export class PrivateClientVpnStack extends cdk.Stack {
       // ...
     });
 
-    // create an elastic ip address
-    const eip = new ec2.CfnEIP(this, 'ElasticIp', {
-      domain: "vpc"
-    });
-
     // create the user data scripts
     var userdatacommands: string[] = [
-      "set +x",
       "apt-get update",
-      "apt-get install -y awscli jq",
-      `aws ec2 associate-address --instance-id $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --allocation-id ${eip.attrAllocationId} --allow-reassociation --region ${cdk.Stack.of(this).region}`,
-      `aws ec2 modify-instance-attribute --instance-id $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --no-source-dest-check --region ${cdk.Stack.of(this).region}`,
+      "apt-get upgrade -y",
       `echo "openvpn:${props.password}" | chpasswd`,
     ];
 
@@ -72,6 +67,10 @@ export class PrivateClientVpnStack extends cdk.Stack {
       shebang: "#!/bin/bash"
     });
     userData.addCommands(...userdatacommands);
+
+    const topic = new sns.Topic(this, "AsgTopic", {
+      displayName: "Topic for Autoscaling notifications"
+     })
 
     // create the autoscaling group
     const asg = new autoscaling.AutoScalingGroup(this, 'ASG', {
@@ -83,14 +82,30 @@ export class PrivateClientVpnStack extends cdk.Stack {
       minCapacity: 1,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       userData,
+      notificationsTopic: topic
     });
     asg.addSecurityGroup(sg);
 
+    // create the lambda function to describe instances
+    const processEventFn = new lambda.Function(this, 'ProcessEventFunction', {
+      code: new lambda.InlineCode(fs.readFileSync('lambda/process_event.py', { encoding: 'utf-8' })),
+      handler: 'index.lambda_handler',
+      timeout: cdk.Duration.seconds(30),
+      runtime: lambda.Runtime.PYTHON_3_7,
+      environment: {
+        HOSTED_ZONE: props.hostedZoneId,
+        DNS_NAME: `${cdk.Stack.of(this).region}.vpn.${props.zoneName}`,
+      }
+    });
+
     // add policy so that EC2 instance can allocte elastic IP
-    asg.role.addToPolicy(new iam.PolicyStatement({
-      resources: ['*'],
-      actions: [ "ec2:DescribeAddresses", "ec2:AllocateAddress", "ec2:DescribeInstances", "ec2:AssociateAddress", "ec2:ModifyInstanceAttribute" ],
-    }));
+    if (processEventFn.role) {
+      processEventFn.role.addToPolicy(new iam.PolicyStatement({
+        resources: ['*'],
+        actions: [  "ec2:DescribeInstances",  "ec2:ModifyInstanceAttribute", "route53:ChangeResourceRecordSets" ],
+      }));
+    }
+    processEventFn.addEventSource(new SnsEventSource(topic)); 
 
     new cdk.CfnOutput(this, 'OpenVPNUrl', { value: `https://${cdk.Stack.of(this).region}.vpn.${props.zoneName}/admin` });
   }
