@@ -22,6 +22,10 @@ export class PrivateClientVpnStack extends cdk.Stack {
     const password = ssm.StringParameter.valueForSecureStringParameter(this, "openvpn-admin-passwd", 1);
     const keyname = ssm.StringParameter.valueForStringParameter(this, "openvpn-keyname");
 
+    // get the VPN username and password
+    const vpn_username = ssm.StringParameter.valueForStringParameter(this, "openvpn-user-name");
+    const vpn_password = ssm.StringParameter.valueForSecureStringParameter(this, "openvpn-user-passwd", 1);
+
     // Create the VPC with 2 public subnets
     const vpc = new ec2.Vpc(this, "ClientVpnVpc", {
       maxAzs: 2,
@@ -57,9 +61,13 @@ export class PrivateClientVpnStack extends cdk.Stack {
 
     // create the user data scripts
     var userdatacommands: string[] = [
-      "apt-get update",
-      "apt-get upgrade -y",
       `echo "openvpn:${password}" | chpasswd`,
+      "/usr/local/openvpn_as/scripts/sacli --key \"vpn.client.routing.reroute_gw\" --value \"true\" ConfigPut",
+      `/usr/local/openvpn_as/scripts/sacli --user ${vpn_username} --key "type" --value "user_connect" UserPropPut`,
+      `/usr/local/openvpn_as/scripts/sacli --user ${vpn_username} --key "prop_autologin" --value "true" UserPropPut`,
+      `/usr/local/openvpn_as/scripts/sacli --user ${vpn_username} --new_pass ${vpn_password} SetLocalPassword`,
+      "/usr/local/openvpn_as/scripts/sacli start",
+      "echo 'Updated OpenVPN config successfully'"
     ];
 
     const userData = ec2.UserData.forLinux({
