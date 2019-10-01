@@ -19,12 +19,12 @@ export class PrivateClientVpnStack extends cdk.Stack {
     // get parameters from SSM
     const hostedZone = ssm.StringParameter.valueForStringParameter(this, "openvpn-hosted-zone");
     const zoneName = ssm.StringParameter.valueForStringParameter(this, "openvpn-zone-name");
-    const password = ssm.StringParameter.valueForSecureStringParameter(this, "openvpn-admin-passwd", 1);
+    const adminPassword = ssm.StringParameter.valueForStringParameter(this, "openvpn-admin-passwd");
     const keyname = ssm.StringParameter.valueForStringParameter(this, "openvpn-keyname");
 
     // get the VPN username and password
-    const vpn_username = ssm.StringParameter.valueForStringParameter(this, "openvpn-user-name");
-    const vpn_password = ssm.StringParameter.valueForSecureStringParameter(this, "openvpn-user-passwd", 1);
+    const vpnUsername = ssm.StringParameter.valueForStringParameter(this, "openvpn-user-name");
+    const vpnPassword = ssm.StringParameter.valueForStringParameter(this, "openvpn-user-passwd");
 
     // Create the VPC with 2 public subnets
     const vpc = new ec2.Vpc(this, "ClientVpnVpc", {
@@ -61,11 +61,11 @@ export class PrivateClientVpnStack extends cdk.Stack {
 
     // create the user data scripts
     var userdatacommands: string[] = [
-      `echo "openvpn:${password}" | chpasswd`,
+      `echo "openvpn:${adminPassword}" | chpasswd`,
       "/usr/local/openvpn_as/scripts/sacli --key \"vpn.client.routing.reroute_gw\" --value \"true\" ConfigPut",
-      `/usr/local/openvpn_as/scripts/sacli --user ${vpn_username} --key "type" --value "user_connect" UserPropPut`,
-      `/usr/local/openvpn_as/scripts/sacli --user ${vpn_username} --key "prop_autologin" --value "true" UserPropPut`,
-      `/usr/local/openvpn_as/scripts/sacli --user ${vpn_username} --new_pass ${vpn_password} SetLocalPassword`,
+      `/usr/local/openvpn_as/scripts/sacli --user ${vpnUsername} --key "type" --value "user_connect" UserPropPut`,
+      `/usr/local/openvpn_as/scripts/sacli --user ${vpnUsername} --key "prop_autologin" --value "true" UserPropPut`,
+      `/usr/local/openvpn_as/scripts/sacli --user ${vpnUsername} --new_pass ${vpnPassword} SetLocalPassword`,
       "/usr/local/openvpn_as/scripts/sacli start",
       "echo 'Updated OpenVPN config successfully'"
     ];

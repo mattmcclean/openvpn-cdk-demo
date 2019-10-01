@@ -8,6 +8,7 @@ const app = new cdk.App();
 new PrivateClientVpnStack(app, 'PrivateClientVpnStack', {
     env: { 
         account: process.env.CDK_DEFAULT_ACCOUNT, 
-        region: 'eu-west-2'
+        region: process.env.CDK_DEFAULT_REGION || process.env.AWS_DEFAULT_REGION
+        //region: 'eu-west-2'
     }
 });
