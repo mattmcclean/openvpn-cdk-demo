@@ -6,6 +6,9 @@ import lambda = require('@aws-cdk/aws-lambda');
 import sns = require('@aws-cdk/aws-sns');
 import ssm = require('@aws-cdk/aws-ssm');
 
+import { Rule, Schedule } from '@aws-cdk/aws-events';
+import { LambdaFunction } from '@aws-cdk/aws-events-targets';
+
 import { SnsEventSource } from '@aws-cdk/aws-lambda-event-sources';
 
 import fs = require('fs');
@@ -82,11 +85,12 @@ export class PrivateClientVpnStack extends cdk.Stack {
     // create the autoscaling group
     const asg = new autoscaling.AutoScalingGroup(this, 'ASG', {
       vpc,
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.LARGE),
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
       machineImage: openVpnImage,
       keyName: keyname,
       maxCapacity: 1,
-      minCapacity: 1,
+      minCapacity: 0,
+      desiredCapacity: 0,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       userData,
       notificationsTopic: topic
@@ -104,6 +108,50 @@ export class PrivateClientVpnStack extends cdk.Stack {
         DNS_NAME: `${cdk.Stack.of(this).region}.vpn.${zoneName}`,
       }
     });
+
+    // create the lambda function to set ASG to 0
+    const setAsgToZeroFn = new lambda.Function(this, 'SetAsgToZeroFunction', {
+      code: new lambda.InlineCode(fs.readFileSync('lambda/set_desired_asg_size.py', { encoding: 'utf-8' })),
+      handler: 'index.lambda_handler',
+      timeout: cdk.Duration.seconds(10),
+      runtime: lambda.Runtime.PYTHON_3_7,
+      environment: {
+        DESIRED_ASG_SIZE: '0',
+        ASG_GROUP_NAME: asg.autoScalingGroupName,
+      }
+    });
+    if (setAsgToZeroFn.role) {
+      setAsgToZeroFn.role.addToPolicy(new iam.PolicyStatement({ resources: [asg.autoScalingGroupArn], actions: [ "autoscaling:UpdateAutoScalingGroup" ] }));
+    }    
+
+    // create the lambda function to set ASG to 0
+    const setAsgToOneFn = new lambda.Function(this, 'SetAsgToOneFunction', {
+      code: new lambda.InlineCode(fs.readFileSync('lambda/set_desired_asg_size.py', { encoding: 'utf-8' })),
+      handler: 'index.lambda_handler',
+      timeout: cdk.Duration.seconds(10),
+      runtime: lambda.Runtime.PYTHON_3_7,
+      environment: {
+        DESIRED_ASG_SIZE: '1',
+        ASG_GROUP_NAME: asg.autoScalingGroupName,
+      }
+    });
+    if (setAsgToOneFn.role) {
+      setAsgToOneFn.role.addToPolicy(new iam.PolicyStatement({ resources: [asg.autoScalingGroupArn], actions: [ "autoscaling:UpdateAutoScalingGroup" ] }));
+    }
+
+    // add scheduled rule to run every week on Sat at 8am
+    new Rule(this, 'AddCapacityRule', {
+      enabled: true,
+      schedule: Schedule.cron({ weekDay: 'SAT', hour: '8'}),
+      targets: [new LambdaFunction(setAsgToOneFn)],
+    });
+
+    // add scheduled rule to run every week on Sun at 11pm
+    new Rule(this, 'RemoveCapacityRule', {
+      enabled: true,
+      schedule: Schedule.cron({ weekDay: 'SUN', hour: '23'}),
+      targets: [new LambdaFunction(setAsgToZeroFn)],
+    });    
 
     // add policy so that EC2 instance can allocte elastic IP
     if (processEventFn.role) {
