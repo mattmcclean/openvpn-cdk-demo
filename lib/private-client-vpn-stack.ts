@@ -13,10 +13,22 @@ import { SnsEventSource } from '@aws-cdk/aws-lambda-event-sources';
 
 import fs = require('fs');
 
+export interface PrivateClientVpnStackProps extends cdk.StackProps {
+
+  readonly instanceType?: ec2.InstanceType;
+
+  readonly desiredAsgCapacity?: number;
+
+  readonly addCapacitySchedule?: Schedule;
+
+  readonly removeCapacitySchedule?: Schedule;
+}
+
+
 export class PrivateClientVpnStack extends cdk.Stack {
 
 
-  constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: cdk.Construct, id: string, props: PrivateClientVpnStackProps) {
     super(scope, id, props);
 
     // get parameters from SSM
@@ -85,12 +97,13 @@ export class PrivateClientVpnStack extends cdk.Stack {
     // create the autoscaling group
     const asg = new autoscaling.AutoScalingGroup(this, 'ASG', {
       vpc,
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
+      instanceType: props.instanceType ? props.instanceType 
+              : ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
       machineImage: openVpnImage,
       keyName: keyname,
       maxCapacity: 1,
       minCapacity: 0,
-      desiredCapacity: 0,
+      desiredCapacity: props.desiredAsgCapacity ? props.desiredAsgCapacity : 1,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       userData,
       notificationsTopic: topic
@@ -109,50 +122,6 @@ export class PrivateClientVpnStack extends cdk.Stack {
       }
     });
 
-    // create the lambda function to set ASG to 0
-    const setAsgToZeroFn = new lambda.Function(this, 'SetAsgToZeroFunction', {
-      code: new lambda.InlineCode(fs.readFileSync('lambda/set_desired_asg_size.py', { encoding: 'utf-8' })),
-      handler: 'index.lambda_handler',
-      timeout: cdk.Duration.seconds(10),
-      runtime: lambda.Runtime.PYTHON_3_7,
-      environment: {
-        DESIRED_ASG_SIZE: '0',
-        ASG_GROUP_NAME: asg.autoScalingGroupName,
-      }
-    });
-    if (setAsgToZeroFn.role) {
-      setAsgToZeroFn.role.addToPolicy(new iam.PolicyStatement({ resources: [asg.autoScalingGroupArn], actions: [ "autoscaling:UpdateAutoScalingGroup" ] }));
-    }    
-
-    // create the lambda function to set ASG to 0
-    const setAsgToOneFn = new lambda.Function(this, 'SetAsgToOneFunction', {
-      code: new lambda.InlineCode(fs.readFileSync('lambda/set_desired_asg_size.py', { encoding: 'utf-8' })),
-      handler: 'index.lambda_handler',
-      timeout: cdk.Duration.seconds(10),
-      runtime: lambda.Runtime.PYTHON_3_7,
-      environment: {
-        DESIRED_ASG_SIZE: '1',
-        ASG_GROUP_NAME: asg.autoScalingGroupName,
-      }
-    });
-    if (setAsgToOneFn.role) {
-      setAsgToOneFn.role.addToPolicy(new iam.PolicyStatement({ resources: [asg.autoScalingGroupArn], actions: [ "autoscaling:UpdateAutoScalingGroup" ] }));
-    }
-
-    // add scheduled rule to run every week on Sat at 8am
-    new Rule(this, 'AddCapacityRule', {
-      enabled: true,
-      schedule: Schedule.cron({ weekDay: 'SAT', hour: '8'}),
-      targets: [new LambdaFunction(setAsgToOneFn)],
-    });
-
-    // add scheduled rule to run every week on Sun at 11pm
-    new Rule(this, 'RemoveCapacityRule', {
-      enabled: true,
-      schedule: Schedule.cron({ weekDay: 'SUN', hour: '23'}),
-      targets: [new LambdaFunction(setAsgToZeroFn)],
-    });    
-
     // add policy so that EC2 instance can allocte elastic IP
     if (processEventFn.role) {
       processEventFn.role.addToPolicy(new iam.PolicyStatement({
@@ -161,6 +130,49 @@ export class PrivateClientVpnStack extends cdk.Stack {
       }));
     }
     processEventFn.addEventSource(new SnsEventSource(topic)); 
+
+    if (props.addCapacitySchedule && props.removeCapacitySchedule) {
+
+      // create the lambda function to set ASG to 0
+      const setAsgToZeroFn = new lambda.Function(this, 'SetAsgToZeroFunction', {
+        code: new lambda.InlineCode(fs.readFileSync('lambda/set_desired_asg_size.py', { encoding: 'utf-8' })),
+        handler: 'index.lambda_handler',
+        timeout: cdk.Duration.seconds(10),
+        runtime: lambda.Runtime.PYTHON_3_7,
+        environment: {
+          DESIRED_ASG_SIZE: '0',
+          ASG_GROUP_NAME: asg.autoScalingGroupName,
+        }
+      });
+      setAsgToZeroFn.addToRolePolicy(new iam.PolicyStatement({ resources: [asg.autoScalingGroupArn], actions: [ "autoscaling:UpdateAutoScalingGroup" ] }));  
+
+      // create the lambda function to set ASG to 0
+      const setAsgToOneFn = new lambda.Function(this, 'SetAsgToOneFunction', {
+        code: new lambda.InlineCode(fs.readFileSync('lambda/set_desired_asg_size.py', { encoding: 'utf-8' })),
+        handler: 'index.lambda_handler',
+        timeout: cdk.Duration.seconds(10),
+        runtime: lambda.Runtime.PYTHON_3_7,
+        environment: {
+          DESIRED_ASG_SIZE: '1',
+          ASG_GROUP_NAME: asg.autoScalingGroupName,
+        }
+      });
+      setAsgToOneFn.addToRolePolicy(new iam.PolicyStatement({ resources: [asg.autoScalingGroupArn], actions: [ "autoscaling:UpdateAutoScalingGroup" ] }));
+
+      // add scheduled rule to run every week on Sat at 8am
+      new Rule(this, 'AddCapacityRule', {
+        enabled: true,
+        schedule: props.addCapacitySchedule,
+        targets: [new LambdaFunction(setAsgToOneFn)],
+      });
+
+      // add scheduled rule to run every week on Sun at 11pm
+      new Rule(this, 'RemoveCapacityRule', {
+        enabled: true,
+        schedule: props.removeCapacitySchedule,
+        targets: [new LambdaFunction(setAsgToZeroFn)],
+      });    
+    }
 
     new cdk.CfnOutput(this, 'OpenVPNUrl', { value: `https://${cdk.Stack.of(this).region}.vpn.${zoneName}/admin` });
   }
