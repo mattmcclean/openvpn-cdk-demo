@@ -66,11 +66,12 @@ export class PrivateClientVpnStack extends cdk.Stack {
 
     // The OpenVPN AMI map
     const openVpnImage = new ec2.GenericLinuxImage({
-      'us-east-1': 'ami-056907df001eeca0e',
-      'eu-west-1': 'ami-0063fa0451e11ca13',
-      'eu-west-2': 'ami-0d885004ea1a5448e',
-      'ap-south-1': 'ami-08140c4d18b490e59',
-      'ap-southeast-1': 'ami-05f71a611e1c713a6',
+      'us-east-1': 'ami-0acd966a5ea6b1b5f',
+      'eu-west-1': 'ami-073378a1210b802e8',
+      'eu-west-2': 'ami-04f6f64e951610775',
+      'ap-south-1': 'ami-07ec40bd7c315379b',
+      'ap-southeast-1': 'ami-0581e1a14abd56b73',
+      'eu-central-1': 'ami-03dbe587c22d7aa42',
       // ...
     });
 

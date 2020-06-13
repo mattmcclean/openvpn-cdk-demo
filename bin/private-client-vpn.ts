@@ -9,9 +9,9 @@ const app = new cdk.App();
 new PrivateClientVpnStack(app, 'PrivateClientVpnStack', {
     env: { 
         account: process.env.CDK_DEFAULT_ACCOUNT, 
-        region: 'eu-west-2'
+        region: 'eu-central-1'
     },
-    desiredAsgCapacity: 0,
-    addCapacitySchedule: Schedule.cron({ minute: '0', hour: '20' }),
-    removeCapacitySchedule: Schedule.cron({ minute: '0', hour: '1' }),
+    desiredAsgCapacity: 1,
+    //addCapacitySchedule: Schedule.cron({ minute: '0', hour: '20' }),
+    //removeCapacitySchedule: Schedule.cron({ minute: '0', hour: '1' }),
 });
