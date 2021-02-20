@@ -5,7 +5,7 @@ Follow the steps below to setup a new OpenVPN server.
 
 1. Setup a new Route53 hosted zone and register with a domain name. Get the domain name and hosted zone id.
 
-1. Upload SSM parameters to the approprivate cloud with the following commands:
+2. Upload SSM parameters to the approprivate cloud with the following commands:
 
 ```
 # update the Route53 Hosted Zone ID
@@ -26,4 +26,6 @@ aws ssm put-parameter --name "openvpn-user-name" --value <user-name> --type Stri
 # update the openvpn user password
 aws ssm put-parameter --name "openvpn-user-passwd" --value <user-password> --type String
 ```
-3.  Run the CDK deploy commands: ```cdk deploy```
+3.  Accept OpenVpn [license agreement](https://aws.amazon.com/marketplace/pp/B00MI40CAE/) if not already accepted.
+
+4.  Run the CDK deploy commands: ```cdk deploy```
