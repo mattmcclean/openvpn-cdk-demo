@@ -72,6 +72,8 @@ export class PrivateClientVpnStack extends cdk.Stack {
       'ap-south-1': 'ami-07ec40bd7c315379b',
       'ap-southeast-1': 'ami-0581e1a14abd56b73',
       'eu-central-1': 'ami-03dbe587c22d7aa42',
+      'eu-north-1': 'ami-067349b5a5143523d',
+      'eu-south-1': 'ami-0b6d15c993d405ed4',
       // ...
     });
 
